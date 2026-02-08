@@ -5,27 +5,56 @@ import sys
 from datetime import datetime
 from urllib.request import urlretrieve
 
-
 DEFAULT_URL = "http://s3.amazonaws.com/cuny-is211-spring2015/weblog.csv"
 
 
 def detect_browser(user_agent: str) -> str:
     ua = user_agent or ""
 
-    # Order matters:
-    # Chrome UA usually contains "Safari" too, so check Chrome first.
+    # Order matters: Chrome UA often contains "Safari" too
     if re.search(r"Firefox", ua, re.IGNORECASE):
         return "Firefox"
     if re.search(r"Chrome", ua, re.IGNORECASE):
         return "Chrome"
-    # Internet Explorer patterns
     if re.search(r"MSIE|Trident", ua, re.IGNORECASE):
         return "Internet Explorer"
-    # Safari (but not Chrome)
     if re.search(r"Safari", ua, re.IGNORECASE) and not re.search(r"Chrome", ua, re.IGNORECASE):
         return "Safari"
 
     return "Other"
+
+
+def extract_hour(dt_str: str):
+    """
+    Return hour (0-23) from dt_str, or None if cannot parse.
+    Tries common datetime formats, then falls back to regex hour extraction.
+    """
+    if not dt_str:
+        return None
+
+    dt_str = dt_str.strip()
+
+    # Try common formats
+    formats = (
+        "%m/%d/%Y %H:%M:%S",  # 01/27/2014 03:26:04
+        "%m/%d/%Y %H:%M",     # 01/27/2014 03:26
+        "%Y-%m-%d %H:%M:%S",  # 2014-01-27 03:26:04
+        "%Y-%m-%d %H:%M",     # 2014-01-27 03:26
+    )
+    for fmt in formats:
+        try:
+            return datetime.strptime(dt_str, fmt).hour
+        except ValueError:
+            pass
+
+    # Fallback: pull hour from something like "03:26" or "3:26:04"
+    m = re.search(r"\b(\d{1,2}):\d{2}(:\d{2})?\b", dt_str)
+    if m:
+        hour = int(m.group(1))
+        if 0 <= hour <= 23:
+            return hour
+
+    return None
 
 
 def main():
@@ -43,7 +72,7 @@ def main():
         print(f"Details: {e}")
         sys.exit(1)
 
-    # Regex for image hits
+    # Regex for image hits (only if path ends with jpg/gif/png)
     img_re = re.compile(r"\.(jpg|gif|png)$", re.IGNORECASE)
 
     total_hits = 0
@@ -59,27 +88,22 @@ def main():
 
     hourly_hits = {h: 0 for h in range(24)}  # extra credit
 
-    # 2) Read CSV
-    # Example row:
-    # /images/test.jpg, 01/27/2014 03:26:04, Mozilla/5.0 (Linux) Firefox/34.0, 200, 346547
+    # 2) Read CSV and store in memory
+    rows = []
     with open(local_file, "r", newline="", encoding="utf-8") as f:
         reader = csv.reader(f, skipinitialspace=True)
-        rows = []
-
         for row in reader:
-            if len(row) < 5:
-                continue  # skip bad lines
+            if len(row) < 3:
+                continue
 
             path = row[0].strip()
             dt_str = row[1].strip()
             user_agent = row[2].strip()
-            # status = row[3].strip()  # not required for the tasks
-            # size = row[4].strip()    # not required for the tasks
 
             rows.append((path, dt_str, user_agent))
             total_hits += 1
 
-    # 3) Process stored data (in memory)
+    # 3) Process stored data
     for path, dt_str, user_agent in rows:
         # Part III: image hits
         if img_re.search(path):
@@ -89,24 +113,21 @@ def main():
         b = detect_browser(user_agent)
         browser_counts[b] += 1
 
-        # Extra credit: hour counts
-        try:
-            dt = datetime.strptime(dt_str, "%m/%d/%Y %H:%M:%S")
-            hourly_hits[dt.hour] += 1
-        except ValueError:
-            pass
+        # Part VI (Extra Credit): hourly hits
+        hour = extract_hour(dt_str)
+        if hour is not None:
+            hourly_hits[hour] += 1
 
     # Output: Image percent
     percent = (image_hits / total_hits * 100) if total_hits else 0.0
     print(f"Image requests account for {percent:.1f}% of all requests")
 
-    # Output: Most popular browser (only among the 4 required, but we keep Other too)
-    # If you want ONLY the 4, remove "Other" before max.
-    popular_browser = max(browser_counts, key=browser_counts.get)
+    # Output: Most popular browser (ONLY among the 4 required)
+    main_browsers = {k: v for k, v in browser_counts.items() if k != "Other"}
+    popular_browser = max(main_browsers, key=main_browsers.get)
     print(f"Most popular browser is {popular_browser}")
 
     # Extra credit output: hours sorted by hits desc
-    # Format like: Hour 12 has 1023 hits
     sorted_hours = sorted(hourly_hits.items(), key=lambda x: x[1], reverse=True)
     for hour, hits in sorted_hours:
         print(f"Hour {hour:02d} has {hits} hits")
@@ -114,4 +135,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-   
